@@ -16,51 +16,52 @@ public class DataMgr : MonoBehaviour {
         m_Instance = this;
     }
 
-    public PullBar m_PullBar;
+    public Puck m_Pack;
+    public Transform m_WallPrarent;
+    public Transform m_MyDoor;
+    public Transform m_AIDoor;
+    public Transform m_CenterLine;
 
     public Rect GetWallRect()
     {
         Rect wallRect = new Rect();
 
         Transform myTransform = this.transform;
-        WallController[] walls = myTransform.parent.GetComponentsInChildren<WallController>();
-        if (walls == null || walls.Length <4)
+        WallController[] walls = m_WallPrarent.GetComponentsInChildren<WallController>();
+        if (walls == null || walls.Length < 4)
         {
             return wallRect;
         }
 
 
-        for (int index =0;index<walls.Length;index++)
+        for (int index = 0; index < walls.Length; index++)
         {
             Vector3 pos = walls[index].transform.position;
-            if(index == 0)
+            if(walls[index].m_Direction == WallController.Direction.Left)
             {
-                wallRect.x = pos.x;
-                wallRect.y = pos.y;
-                wallRect.width = 0;
-                wallRect.height = 0;
+                wallRect.xMin = pos.x + walls[index].Width()/2;
             }
-            else
+            if (walls[index].m_Direction == WallController.Direction.Right)
             {
-                if(pos.x < wallRect.x)
-                {
-                    wallRect.x = pos.x;
-                }else
-                {
-                    wallRect.width = pos.x - wallRect.x;
-                }
-
-                if (pos.y > wallRect.y)
-                {
-                    wallRect.y = pos.y;
-                }
-                else
-                {
-                    wallRect.height = pos.y - wallRect.y;
-                }
+                wallRect.xMax =  pos.x - walls[index].Width() / 2; ;
+            }
+            if (walls[index].m_Direction == WallController.Direction.Up)
+            {
+                wallRect.yMax = pos.y - walls[index].Height() / 2; ;
+            }
+            if (walls[index].m_Direction == WallController.Direction.Down)
+            {
+                wallRect.yMin = pos.y + walls[index].Height() / 2; ;
             }
         }
 
         return wallRect;
+    }
+
+    public bool PlaySide()
+    {
+        if (m_Pack.transform.position.y < m_CenterLine.transform.position.y)
+            return true;
+        return false;
     }
 }
