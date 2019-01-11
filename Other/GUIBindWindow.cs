@@ -6,13 +6,19 @@ using System.Text;
 using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.UI;
 using Object = UnityEngine.Object;
 
+//Foldout 
 public class GUIBindWindow : EditorWindow
 {
     private static GUIBindWindow m_Instance = null;
 
-    private static string TemplePath = "Assets/openTest/GUIBindTemple.cs";
+    private static string TemplePath = "Assets/GUIBindEditor/GUIBindTemple.cs";
+
+    private static string[] ButtonEvent = new[] { "onClick", "onDown", "onUp", "onBeginDrag", "onDrag", "onEndDrag" };
+    private static string[] SliderEvent = new[] { "onValueChanged" };
+    private static string[] ToggleEvent = new[] { "onValueChanged" };
 
     private Object m_InputObject;
     private Vector2 m_ScrollViewPos;
@@ -238,9 +244,9 @@ public class GUIBindWindow : EditorWindow
         }
 
         EditorGUILayout.BeginHorizontal();
-        GUILayout.Label("对象");
+        GUILayout.Label("对象",GUILayout.Width(140));
         GUILayout.Label("控件");
-        GUILayout.Label("命名");
+        GUILayout.Label("命名", GUILayout.Width(180));
         EditorGUILayout.EndHorizontal();
         
         int buttonInitPosY = 45;
@@ -252,10 +258,13 @@ public class GUIBindWindow : EditorWindow
 
             GUI.backgroundColor = Color.red;
             EditorGUILayout.BeginHorizontal("helpbox");
-            
-            EditorGUILayout.LabelField(curCell.m_Name);
+
+            int[] eventX;
+            OnGUI_EventCell(curCell.m_Event, buttonInitPosY, out eventX);
+
+            EditorGUILayout.LabelField(curCell.m_Name, GUILayout.Width(130));
             EditorGUILayout.LabelField(curCell.GetComponentName());
-            EditorGUILayout.LabelField(curCell.GetName());
+            EditorGUILayout.LabelField(curCell.GetName(), GUILayout.Width(180));
 
             GUI.backgroundColor = Color.white;
             if (GUI.Button(new Rect(664, buttonInitPosY , 30, 22), "x"))
@@ -282,15 +291,13 @@ public class GUIBindWindow : EditorWindow
 
             EditorGUILayout.BeginHorizontal("helpbox");
 
-            GUI.backgroundColor = new Color(0.87f, 0.87f, 0.87f);
-            if (GUI.Button(new Rect(8, buttonInitPosY + 26 * cellcount, 656, 22), ""))
-            {
-                Ping(curCell.m_Target);
-            }
+            int[] eventX = null;
+            OnGUI_EventCell(curCell.m_Event, buttonInitPosY + 26 * cellcount,out eventX);
+            OnGUI_BindCellBackground(eventX, buttonInitPosY + 26 * cellcount, curCell);
 
-            EditorGUILayout.LabelField(curCell.m_Target.name);
+            EditorGUILayout.LabelField(curCell.m_Target.name, GUILayout.Width(130));
             EditorGUILayout.LabelField(curCell.GetComponentName());
-            EditorGUILayout.LabelField(curCell.GetName());
+            EditorGUILayout.LabelField(curCell.GetName(), GUILayout.Width(180));
 
             GUI.backgroundColor = Color.white;
             if (GUI.Button(new Rect(664, buttonInitPosY + 26 * cellcount, 30, 22), "x"))
@@ -306,13 +313,97 @@ public class GUIBindWindow : EditorWindow
 
     }
 
+    private void OnGUI_EventCell(EventCell target,int y,out int[] x)
+    {
+        x = new[] {0, 0};
+
+        string[] componentEvents = target.ComponentEvents();
+
+        if (componentEvents == null || componentEvents.Length == 0)
+        {
+            return;
+        }
+
+        System.Collections.Generic.List<string> options = new List<string>() {"Null"};
+        options.AddRange(componentEvents);
+        string[] optionsArray = options.ToArray();
+
+        int[] unableEvents = target.GetUnableEvent();
+        int[] enableEvents = target.GetEnableEvent();
+
+        int curEventLength = unableEvents!=null ? unableEvents.Length + 1: 1;
+        int[] curEvnets = new int[curEventLength];
+
+        int xInit = 200;
+
+        GUIStyle popup = EditorStyles.popup;
+        popup.fixedHeight = 22;
+
+        GUI.depth -= 1;
+        if (unableEvents != null && unableEvents.Length > 0)
+        {
+            x[0] = xInit;
+            for (var index = 0; index < unableEvents.Length; index++)
+            {
+                curEvnets[index] = EditorGUI.Popup(new Rect(x[0], y, 50, 40), unableEvents[index] + 1, optionsArray, popup);
+                x[0] += 50;
+            }
+        }
+
+        if (enableEvents != null && enableEvents.Length > 0)
+        {
+            x[0] = x[0] == 0 ? xInit : x[0];
+            curEvnets[curEventLength - 1] = EditorGUI.Popup(new Rect(x[0], y, 50, 40), 0, optionsArray, popup);
+            x[0] += 50;
+        }
+
+        x[1] = x[0];
+        x[0] = xInit-8;
+
+
+
+        target.Clear();
+        for (var index = 0; index < curEvnets.Length; index++)
+        {
+            int curIndex = curEvnets[index] - 1;
+            if (curIndex >= 0)
+            {
+                target.AddIndex(curIndex);
+            }
+        }
+
+    }
+
+    private void OnGUI_BindCellBackground(int[] eventX,int y,BindCell curCell)
+    {
+        GUI.backgroundColor = new Color(0.87f, 0.87f, 0.87f);
+        if (eventX[0] == 0)
+        {
+            if (GUI.Button(new Rect(8, y, 656, 22), ""))
+            {
+            Ping(curCell.m_Target);
+        }
+    }
+      else
+      {
+          if (GUI.Button(new Rect(8, y, eventX[0], 22), ""))
+          {
+              Ping(curCell.m_Target);
+}
+          if (GUI.Button(new Rect(eventX[1], y, 664 - eventX[1], 22), ""))
+          {
+              Ping(curCell.m_Target);
+          }
+      }
+    }
+
     #endregion
 
     #region 获取
 
     private void GetCode(string filePath)
     {
-        string regex = "(?<name>[\\w\\W]+) = m_Transform.Find\\(\"(?<path>[\\w\\W]+)\"\\)";
+        string menberRegex = "(?<name>[\\w\\W]+) = m_Transform.Find\\(\"(?<path>[\\w\\W]+)\"\\)";
         Dictionary<string,BindCell> cells = new Dictionary<string, BindCell>();
         using (StreamReader reader = File.OpenText(filePath))
         {
@@ -321,7 +412,7 @@ public class GUIBindWindow : EditorWindow
             while ((line = reader.ReadLine()) != null)
             {
             
-                if (line.Contains("Menber End")|| line.Contains("Init End"))
+                if (line.Contains("Menber End")|| line.Contains("Init End") || line.Contains("EventListener End"))
                 {
                     state = 0;
                 }
@@ -329,6 +420,10 @@ public class GUIBindWindow : EditorWindow
                 if (state == 1)
                 {
                     string[] content = line.Split(' ');
+                    if (content.Length < 7)
+                    {
+                        continue;
+                    }
                     BindCell cell = new BindCell();
                     cell.m_BehaviourType = content[5];
                     cell.m_Name = content[6];
@@ -337,7 +432,7 @@ public class GUIBindWindow : EditorWindow
 
                 if (state == 2)
                 {
-                    Match match = Regex.Match(line, regex);
+                    Match match = Regex.Match(line, menberRegex);
                     if (match.Groups.Count > 1)
                     {
                         string name = match.Groups["name"].Value.Replace(" ", string.Empty);
@@ -354,10 +449,11 @@ public class GUIBindWindow : EditorWindow
                         if (target != null)
                         {
                             cell.SetRoot(target.gameObject);
+                            cell.SetBehaviour(null);
+
                             if (cell.m_BehaviourType == "GameObject")
                             {
                                 cell.m_Type = BindCell.type.gameobject;
-                                cell.m_BehaviourType = null;
                                 component = cell.m_Target;
                                 AddComponent(cell.m_Target);
                             }
@@ -365,7 +461,6 @@ public class GUIBindWindow : EditorWindow
                             {
                                 cell.m_Type = BindCell.type.transform;
 
-                                cell.m_BehaviourType = null;
                                 component = cell.m_Target.transform;
                                 AddComponent(cell.m_Target.transform);
                             }
@@ -375,7 +470,7 @@ public class GUIBindWindow : EditorWindow
                                 component = cell.m_Target.GetComponent(cell.m_BehaviourType);
                                 if (component != null)
                                 {
-                                    cell.m_Behaviour = component as MonoBehaviour;
+                                    cell.SetBehaviour((MonoBehaviour)component);
                                     AddComponent(cell.m_Behaviour);
                                 }
                             }
@@ -389,6 +484,30 @@ public class GUIBindWindow : EditorWindow
                     }
                 }
 
+                if (state == 3)
+                {
+                    BindCell curCell;
+                    for (var index = 0; index < m_BindCells.Count; index++)
+                    {
+                        curCell = m_BindCells[index];
+                        if (curCell.m_Event.GetEventType() == EventCell.type.Other)
+                        {
+                            continue;
+                        }
+
+                        if (!line.Contains(curCell.GetName()))
+                        {
+                            continue;
+                        }
+
+                        int id = curCell.m_Event.GetComponentId(line);
+                        if (id != -1)
+                        {
+                            curCell.m_Event.AddIndex(id);
+                        }
+                    }
+                }
+
                 if (line.Contains("Menber Start"))
                 {
                     state = 1;
@@ -397,6 +516,11 @@ public class GUIBindWindow : EditorWindow
                 if (line.Contains("Init Start"))
                 {
                     state = 2;
+                }
+
+                if (line.Contains("EventListener Start"))
+                {
+                    state = 3;
                 }
             }
         }
@@ -441,6 +565,18 @@ public class GUIBindWindow : EditorWindow
 
     private void SetRoot(GameObject target)
     {
+        m_BindCells.Clear();
+        m_DualCells.Clear();
+        m_UnabelCells.Clear();
+        m_deleteCells.Clear();
+
+        if (target == null)
+        {
+            m_Root = null;
+            m_InputObject = null;
+            return;
+        }
+
         object prefabRoot = PrefabUtility.GetPrefabObject(target);
         if (prefabRoot == null)
         {
@@ -454,17 +590,12 @@ public class GUIBindWindow : EditorWindow
         m_Root = PrefabUtility.FindPrefabRoot(target);
         m_InputObject = m_Root;
 
-        NewCurInfo(Selection.activeGameObject);
-
-        m_BindCells.Clear();
-        m_DualCells.Clear();
-        m_UnabelCells.Clear();
-        m_deleteCells.Clear();
-
         if (File.Exists(TemplePath))
         {
             GetCode(TemplePath);
         }
+
+        NewCurInfo(Selection.activeGameObject);
     }
 
     private void AddBindCell(object target)
@@ -718,71 +849,85 @@ public class GUIBindWindow : EditorWindow
 
         StringBuilder memberStrBuilder = new StringBuilder();
         StringBuilder initStrBuilder = new StringBuilder();
+        StringBuilder listenerBuilder = new StringBuilder();
+
+        BindCell curCell;
+        for (var index = 0; index < m_BindCells.Count; index++)
+        {
+            curCell = m_BindCells[index];
+
+            memberStrBuilder.Append(curCell.GetMenberLine());
+            initStrBuilder.Append(curCell.GetInitLine());
+            listenerBuilder.Append(curCell.GetListenerLine());
+        }
+
+        List<string> existListenerFuns = new List<string>();
+        string listenerFunRegex = "void (?<funName>[\\w\\W]+)\\(";
 
         using (StreamReader reader = File.OpenText(TemplePath))
         {
             bool replace = false;
+            bool check = false;
 
             string line;
             while ((line = reader.ReadLine()) != null)
             {
-
-                if (!replace)
-                {
-                    codeStringBuilder.Append(string.IsNullOrEmpty(line)|| line == "\n"?"\n": line+"\n");
-                }
-
-
-                if (line.Contains("Menber Start"))
-                {
-                    replace = true;
-                    BindCell curCell;
-                    for (var index = 0; index < m_BindCells.Count; index++)
-                    {
-                        curCell = m_BindCells[index];
-                        memberStrBuilder.AppendFormat("    private {1} m_{0} = null;\n", curCell.GetName(), curCell.GetComponentName());
-
-                        if (curCell.m_Type == BindCell.type.gameobject)
-                        {
-                            initStrBuilder.AppendFormat("        m_{0} = m_Transform.Find(\"{1}\").gameObject;\n", curCell.GetName(), curCell.m_Path);
-                        }
-                        else if (curCell.m_Type == BindCell.type.transform)
-                        {
-                            initStrBuilder.AppendFormat("        m_{0} = m_Transform.Find(\"{1}\");\n", curCell.GetName(), curCell.m_Path);
-                        }
-                        else
-                        {
-                            if (string.IsNullOrEmpty(curCell.m_Path))
-                            {
-                                initStrBuilder.AppendFormat("        m_{0} = m_Transform.GetComponent<{1}>();\n", curCell.GetName(), curCell.GetComponentName());
-                            }
-                            else
-                            {
-                                initStrBuilder.AppendFormat("        m_{0} = m_Transform.Find(\"{1}\").GetComponent<{2}>();\n", curCell.GetName(), curCell.m_Path, curCell.GetComponentName());
-                            }
-                        }
-
-                    }
-
-                }
-
                 if (line.Contains("Menber End"))
                 {
                     replace = false;
                     codeStringBuilder.Append(memberStrBuilder);
-                    codeStringBuilder.Append(string.IsNullOrEmpty(line) || line == "\n" ? "\n" : line + "\n");
-                }
-
-                if (line.Contains("Init Start"))
-                {
-                    replace = true;
                 }
 
                 if (line.Contains("Init End"))
                 {
                     replace = false;
                     codeStringBuilder.Append(initStrBuilder);
+                }
+
+                if (line.Contains("EventListener End"))
+                {
+                    replace = false;
+                    codeStringBuilder.Append(listenerBuilder);
+                }
+
+                if (line.Contains("EventListenerFun End"))
+                {
+                    check = false;
+
+                    BindCell cell;
+                    for (var index = 0; index < m_BindCells.Count; index++)
+                    {
+                        cell = m_BindCells[index];
+                        codeStringBuilder.Append(cell.GetListenerFunLine(existListenerFuns));
+                    }
+                }
+
+                if (!replace)
+                {
                     codeStringBuilder.Append(string.IsNullOrEmpty(line) || line == "\n" ? "\n" : line + "\n");
+                }
+
+
+                if (line.Contains("Menber Start") || line.Contains("Init Start")  || line.Contains("EventListener Start"))
+                {
+                    replace = true;
+                }
+
+                if (line.Contains("EventListenerFun Start"))
+                {
+                    check = true;
+                }
+
+                if (check)
+                {
+                    if (line.Contains("void"))
+                    {
+                        Match match = Regex.Match(line, listenerFunRegex);
+                        if (match.Groups.Count > 1)
+                        {
+                            existListenerFuns.Add(match.Groups["funName"].Value);
+                        }
+                    }
                 }
             }
 
@@ -823,6 +968,7 @@ public class GUIBindWindow : EditorWindow
         public GameObject m_Target;
         public MonoBehaviour m_Behaviour = null;
         public type m_Type;
+
         public enum type
         {
             gameobject,
@@ -834,10 +980,17 @@ public class GUIBindWindow : EditorWindow
         public string m_Name = null;
         public string m_BehaviourType = null;
 
+        public EventCell m_Event = null;
+
+        public BindCell()
+        {
+            m_Event = new EventCell();
+        }
+
 
         public bool IsAble()
         {
-            return m_Target != null && (m_Type != type.behaviour || m_Behaviour!=null );
+            return m_Target != null && (m_Type != type.behaviour || m_Behaviour != null);
         }
 
         public void SetRoot(GameObject root)
@@ -856,13 +1009,15 @@ public class GUIBindWindow : EditorWindow
             {
                 m_BehaviourType = m_Behaviour.GetType().Name;
             }
+
+            m_Event.SetEventType(behaviour);
         }
 
         public string GetName()
         {
             if (IsAble())
             {
-                return m_Target.name.Replace(" ",string.Empty) + GetComponentName();
+                return m_Target.name.Replace(" ", string.Empty) + GetComponentName();
             }
             else
             {
@@ -907,6 +1062,308 @@ public class GUIBindWindow : EditorWindow
             {
                 return m_Behaviour;
             }
+        }
+
+        public string GetMenberLine()
+        {
+            return string.Format("    private {1} m_{0} = null;\n", GetName(), GetComponentName());
+        }
+
+        public string GetInitLine()
+        {
+            if (m_Type == BindCell.type.gameobject)
+            {
+                return string.Format("        m_{0} = m_Transform.Find(\"{1}\").gameObject;\n", GetName(), m_Path);
+            }
+            else if (m_Type == BindCell.type.transform)
+            {
+                return string.Format("        m_{0} = m_Transform.Find(\"{1}\");\n", GetName(), m_Path);
+            }
+            else
+            {
+                if (string.IsNullOrEmpty(m_Path))
+                {
+                    return string.Format("        m_{0} = m_Transform.GetComponent<{1}>();\n", GetName(), GetComponentName());
+                }
+                else
+                {
+                    return string.Format("        m_{0} = m_Transform.Find(\"{1}\").GetComponent<{2}>();\n", GetName(), m_Path, GetComponentName());
+                }
+            }
+        }
+        
+
+        public StringBuilder GetListenerLine()
+        {
+            StringBuilder listenerBuilder = new StringBuilder();
+            int[] selectIds = m_Event.GetUnableEvent();
+            if (selectIds != null && selectIds.Length > 0)
+            {
+                for (var index = 0; index < selectIds.Length; index++)
+                {
+                    listenerBuilder.Append(m_Event.GetListenerLine(this,index));
+                }
+            }
+
+            return listenerBuilder;
+        }
+
+        public StringBuilder GetListenerFunLine(List<string> existFunNames)
+        {
+            StringBuilder listenerBuilder = new StringBuilder();
+
+            int[] selectIds = m_Event.GetUnableEvent();
+
+            string funName;
+            if (selectIds != null && selectIds.Length > 0)
+            {
+                for (var index = 0; index < selectIds.Length; index++)
+                {
+                    funName = m_Event.GetFuncName(this, index);
+                    if (existFunNames.Contains(funName))
+                    {
+                        continue;
+                    }
+                    listenerBuilder.Append(m_Event.GetListenerFunLine(this, index));
+                }
+            }
+
+            return listenerBuilder;
+        }
+    }
+
+    private class EventCell
+    {
+        private List<int> m_EventIds = null;
+        private type m_Type;
+
+        public enum type
+        {
+            Other,
+            Button,
+            Slider,
+            Toggle
+        }
+
+        public EventCell()
+        {
+            m_Type = type.Other;
+            m_EventIds = new List<int>();
+        }
+
+        public type GetEventType()
+        {
+            return m_Type;
+        }
+
+        public void SetEventType(MonoBehaviour behaviour)
+        {
+            if (behaviour is Button)
+            {
+                m_Type = type.Button;
+            }
+            else if (behaviour is Slider)
+            {
+                m_Type = type.Slider;
+            }
+            else if (behaviour is Toggle)
+            {
+                m_Type = type.Toggle;
+            }
+            else
+            {
+                m_Type = type.Other;
+            }
+        }
+
+        public void Clear()
+        {
+            m_EventIds.Clear();
+        }
+
+        public void AddIndex(int index)
+        {
+            if (!m_EventIds.Contains(index))
+            {
+                m_EventIds.Add(index);
+            }
+        }
+
+        public int[] GetUnableEvent()
+        {
+            if (m_EventIds.Count == 0)
+            {
+                return null;
+            }
+
+            return m_EventIds.ToArray();
+        }
+
+        public int[] GetEnableEvent()
+        {
+            int[] events = null;
+
+            string[] componentEvents = ComponentEvents();
+
+            if (componentEvents != null)
+            {
+                int length = componentEvents.Length - m_EventIds.Count;
+                if (length != 0)
+                {
+                    events = new int[length];
+                    for (int index = 0, eventIndex = 0; index < componentEvents.Length; index++)
+                    {
+                        if (!m_EventIds.Contains(index))
+                        {
+                            events[eventIndex] = index;
+                            eventIndex += 1;
+                        }
+                    }
+                }
+            }
+
+            return events;
+        }
+
+        public string[] ComponentEvents()
+        {
+            if (m_Type == type.Button)
+            {
+                return ButtonEvent;
+            }
+            else if (m_Type == type.Slider)
+            {
+                return SliderEvent;
+            }
+            else if (m_Type == type.Toggle)
+            {
+                return ToggleEvent;
+            }
+
+            return null;
+        }
+
+        public string GetFuncName(BindCell target, int id)
+        {
+            string[] componentEvents = ComponentEvents();
+            return target.GetName() + componentEvents[id];
+        }
+
+        public string GetListenerLine(BindCell target, int index)
+        {
+            string[] componentEvents = ComponentEvents();
+
+            int id = m_EventIds[index];
+            if (m_Type == type.Button)
+            {
+                if (id == 0) //onclick
+                {
+                    return string.Format("        m_{0}.{1}.AddListener({0}{1});\n", target.GetName(), componentEvents[id]);
+                }
+                else
+                {
+                    return string.Format("        EventTriggerListener.Get(m_{0}.gameObject).{1} = {0}{1};\n", target.GetName(), componentEvents[id]);
+                }
+            }
+            else if (m_Type == type.Slider)
+            {
+                return string.Format("        m_{0}.{1}.AddListener({0}{1});\n", target.GetName(), componentEvents[id]);
+            }
+            else if (m_Type == type.Toggle)
+            {
+                return string.Format("        m_{0}.{1}.AddListener({0}{1});\n", target.GetName(), componentEvents[id]);
+            }
+
+            return null;
+        }
+
+        public string GetListenerFunLine(BindCell target, int index)
+        {
+            int id = m_EventIds[index];
+            if (m_Type == type.Button)
+            {
+                switch (id)
+                {
+                    case 0://click
+                        return string.Format("    private void {0}()\n    {{\n\n    }}\n\n", GetFuncName(target, id));
+                    case 1://Down
+                    case 2://Up
+                    case 3://BeginDrag
+                    case 4://Drag
+                    case 5://EndDrag
+                        return string.Format("    private void {0}(GameObject obj, PointerEventData eventData)\n    {{\n\n    }}\n\n", GetFuncName(target, id));
+                }
+            }
+            else if (m_Type == type.Slider)
+            {
+                return string.Format("    private void {0}(float value)\n    {{\n\n    }}\n\n", GetFuncName(target, id));
+            }
+            else if (m_Type == type.Toggle)
+            {
+                return string.Format("    private void {0}(bool value)\n    {{\n\n    }}\n\n", GetFuncName(target, id));
+            }
+
+            return null;
+        }
+
+        public int GetComponentId(string line)
+        {
+            string[] componentEvents = ComponentEvents();
+            if (m_Type == type.Button)
+            {
+                if (line.Contains("AddListener"))
+                {
+                    return 0;//click
+                }
+
+                string regex = "\\)\\.(?<name>[\\w\\W]+) =";
+                Match match = Regex.Match(line, regex);
+                if (match.Groups.Count > 1)
+                {
+                    string name = match.Groups["name"].Value;
+                    for (var index = 0; index < componentEvents.Length; index++)
+                    {
+                        if (componentEvents[index] == name)
+                        {
+                            return index;
+                        }
+                    }
+                }
+            }
+            else if (m_Type == type.Slider)
+            {
+                string regex = "\\.(?<name>[\\w\\W]+)\\.AddListener";
+                Match match = Regex.Match(line, regex);
+                if (match.Groups.Count > 1)
+                {
+                    string name = match.Groups["name"].Value;
+                    for (var index = 0; index < componentEvents.Length; index++)
+                    {
+                        if (componentEvents[index] == name)
+                        {
+                            return index;
+                        }
+                    }
+                }
+            }
+            else if (m_Type == type.Toggle)
+            {
+                string regex = "\\.(?<name>[\\w\\W]+)\\.AddListener";
+                Match match = Regex.Match(line, regex);
+                if (match.Groups.Count > 1)
+                {
+                    string name = match.Groups["name"].Value;
+                    for (var index = 0; index < componentEvents.Length; index++)
+                    {
+                        if (componentEvents[index] == name)
+                        {
+                            return index;
+                        }
+                    }
+                }
+            }
+
+            return -1;
         }
     }
 
