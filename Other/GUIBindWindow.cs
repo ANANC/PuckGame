@@ -9,19 +9,24 @@ using UnityEngine;
 using UnityEngine.UI;
 using Object = UnityEngine.Object;
 
-//Foldout 
+
 public class GUIBindWindow : EditorWindow
 {
     private static GUIBindWindow m_Instance = null;
 
     private static string TemplePath = "Assets/GUIBindEditor/GUIBindTemple.cs";
 
-    private static string[] ButtonEvent = new[] { "onClick", "onDown", "onUp", "onBeginDrag", "onDrag", "onEndDrag" };
-    private static string[] SliderEvent = new[] { "onValueChanged" };
-    private static string[] ToggleEvent = new[] { "onValueChanged" };
+    private readonly string[] s_EventDefault = new[] { "Button" };//添加按钮时是否添加默认值，填了值就是需要。
+    private static string[] s_ButtonEvent = new[] { "onClick", "onDown", "onUp", "onBeginDrag", "onDrag", "onEndDrag" };
+    private static string[] s_SliderEvent = new[] { "onValueChanged" };
+    private static string[] s_ToggleEvent = new[] { "onValueChanged" };
 
     private Object m_InputObject;
     private Vector2 m_ScrollViewPos;
+    private Color m_DefaultColor = new Color(0.752f, 0.822f, 0.856f);
+    private Color m_SelectColor = new Color(0.996f, 0.92f, 0.296f);
+    private Color m_LossColor = new Color(0.98f, 0.11f, 0.11f);
+    private GUIStyle m_TextRightAlignment;
 
     private GameObject m_Root;
     private List<GameObject> m_RecordGos;
@@ -30,6 +35,7 @@ public class GUIBindWindow : EditorWindow
     private SelectInfo m_CurInfo;
     private List<BindCell> m_BindCells;
     private Dictionary<object, BindCell> m_DualCells;
+    private Dictionary<GameObject, List<BindCell>> m_GoCells;
     private List<BindCell> m_UnabelCells;
     private List<BindCell> m_deleteCells;
 
@@ -63,11 +69,16 @@ public class GUIBindWindow : EditorWindow
     {
         Selection.selectionChanged -= selectionChange;
         EditorApplication.hierarchyWindowChanged += hierarchyWindowChanged;
+        PrefabUtility.prefabInstanceUpdated -= prefabeInstanceUpdated;
+
         m_Instance = null;
     }
 
     private void OnInit()
     {
+        m_TextRightAlignment = new GUIStyle();
+        m_TextRightAlignment.alignment = TextAnchor.MiddleRight;
+
         m_Root = null;
         m_CurInfo = null;
 
@@ -76,6 +87,7 @@ public class GUIBindWindow : EditorWindow
         m_RecordBehaviours = new List<MonoBehaviour>();
         m_BindCells = new List<BindCell>();
         m_DualCells = new Dictionary<object, BindCell>();
+        m_GoCells = new Dictionary<GameObject, List<BindCell>>();
         m_UnabelCells = new List<BindCell>();
         m_deleteCells = new List<BindCell>();
 
@@ -83,26 +95,48 @@ public class GUIBindWindow : EditorWindow
 
         Selection.selectionChanged += selectionChange;
         EditorApplication.hierarchyWindowChanged += hierarchyWindowChanged;
+        PrefabUtility.prefabInstanceUpdated += prefabeInstanceUpdated;
+    }
 
+    private void UnInit()
+    {
+        m_RecordGos.Clear();
+        m_RecordTrans.Clear();
+        m_RecordBehaviours.Clear();
+        m_BindCells.Clear();
+        m_DualCells.Clear();
+        m_GoCells.Clear();
+        m_UnabelCells.Clear();
+        m_deleteCells.Clear();
+    }
+
+    private void prefabeInstanceUpdated(GameObject target)
+    {
+        RefreshAll();
     }
 
     private void selectionChange()
     {
-        NewCurInfo(Selection.activeGameObject);
+        if (m_Instance == null)
+        {
+            return;
+        }
+
         m_Instance.Focus();
         EditorWindow.FocusWindowIfItsOpen(Type.GetType("UnityEditor.SceneHierarchyWindow,UnityEditor"));
     }
 
     private void hierarchyWindowChanged()
     {
-        m_IsPrefab = m_Root != null && PrefabUtility.GetPrefabObject(m_Root) != null;
-
-        if (m_IsPrefab)
+        bool prefab = m_Root != null && PrefabUtility.GetPrefabObject(m_Root) != null;
+        if (m_IsPrefab != prefab)
         {
-            RefreshUnableBindCell();
-            selectionChange();
+            m_IsPrefab = prefab;
+            if (m_IsPrefab)
+            {
+                RefreshAll();
+            }
         }
-
     }
 
     #region GUI
@@ -112,11 +146,10 @@ public class GUIBindWindow : EditorWindow
         EditorGUILayout.BeginHorizontal();
         {
             m_InputObject = EditorGUILayout.ObjectField(m_InputObject, typeof(GameObject));
-            if (m_InputObject != null && m_InputObject != m_Root)
+            if (m_InputObject != m_Root)
             {
-                SetRoot((GameObject) m_InputObject);
+                SetRoot(m_InputObject == null ? null : (GameObject) m_InputObject);
             }
-
         }
 
         if (m_BindCells.Count > 0)
@@ -143,6 +176,11 @@ public class GUIBindWindow : EditorWindow
             return;
         }
 
+        if (m_CurInfo != null && m_CurInfo.m_Enable)
+        {
+            EditorGUILayout.HelpBox("当前选中路径：root/"+m_CurInfo.m_Path, MessageType.None);
+        }
+
         m_deleteCells.Clear();
 
         EditorGUILayout.BeginHorizontal();
@@ -152,9 +190,11 @@ public class GUIBindWindow : EditorWindow
             EditorGUILayout.EndVertical();
 
             m_ScrollViewPos = EditorGUILayout.BeginScrollView(m_ScrollViewPos);
-            EditorGUILayout.BeginVertical("box", GUILayout.Width(694));
-            OnGUI_ExportList();
-            EditorGUILayout.EndVertical();
+            {
+                EditorGUILayout.BeginVertical("box", GUILayout.Width(694));
+                OnGUI_BindCellList();
+                EditorGUILayout.EndVertical();
+            }
             EditorGUILayout.EndScrollView();
         }
         EditorGUILayout.EndHorizontal();
@@ -187,9 +227,11 @@ public class GUIBindWindow : EditorWindow
             return;
         }
 
+        bool record = m_GoCells.ContainsKey(m_CurInfo.m_Target);
+
         if (m_CurInfo.m_Target != m_Root)
         {
-            GUI.backgroundColor = m_CurInfo.m_EnableGo ? Color.white : Color.gray;
+            GUI.backgroundColor = m_CurInfo.m_EnableGo ? (record? m_SelectColor: m_DefaultColor) : Color.gray;
             if (GUILayout.Button("GameObject"))
             {
                 if (!m_CurInfo.m_EnableGo)
@@ -201,7 +243,7 @@ public class GUIBindWindow : EditorWindow
                 AddBindCell(m_CurInfo.m_Target);
             }
 
-            GUI.backgroundColor = m_CurInfo.m_EnableTra ? Color.white : Color.gray;
+            GUI.backgroundColor = m_CurInfo.m_EnableTra ? (record ? m_SelectColor : m_DefaultColor) : Color.gray;
             if (GUILayout.Button("Transform"))
             {
                 if (!m_CurInfo.m_EnableTra)
@@ -216,7 +258,7 @@ public class GUIBindWindow : EditorWindow
 
         for (var index = 0; index < m_CurInfo.m_Behaviours.Length; index++)
         {
-            GUI.backgroundColor = m_CurInfo.m_UnableBehaviours[index] == 0 ? Color.white : Color.gray;
+            GUI.backgroundColor = m_CurInfo.m_UnableBehaviours[index] == 0 ? (record ? m_SelectColor : m_DefaultColor) : Color.gray;
             if (GUILayout.Button(m_CurInfo.m_Behaviours[index].GetType().Name))
             {
                 if (m_CurInfo.m_UnableBehaviours[index] == 0)
@@ -234,7 +276,7 @@ public class GUIBindWindow : EditorWindow
         
     }
 
-    private void OnGUI_ExportList()
+    private void OnGUI_BindCellList()
     {
         EditorGUILayout.LabelField("记录控件");
 
@@ -244,79 +286,111 @@ public class GUIBindWindow : EditorWindow
         }
 
         EditorGUILayout.BeginHorizontal();
-        GUILayout.Label("对象",GUILayout.Width(140));
+        GUILayout.Label("对象", GUILayout.Width(140));
         GUILayout.Label("控件");
-        GUILayout.Label("命名", GUILayout.Width(180));
+        GUILayout.Label("命名", GUILayout.Width(120));
         EditorGUILayout.EndHorizontal();
-        
-        int buttonInitPosY = 45;
 
         BindCell curCell;
         for (var index = 0; index < m_UnabelCells.Count; index++)
         {
             curCell = m_UnabelCells[index];
 
-            GUI.backgroundColor = Color.red;
+            GUI.color = m_LossColor;
+
             EditorGUILayout.BeginHorizontal("helpbox");
-
-            int[] eventX;
-            OnGUI_EventCell(curCell.m_Event, buttonInitPosY, out eventX);
-
+            
             EditorGUILayout.LabelField(curCell.m_Name, GUILayout.Width(130));
-            EditorGUILayout.LabelField(curCell.GetComponentName());
-            EditorGUILayout.LabelField(curCell.GetName(), GUILayout.Width(180));
+            if (curCell.m_Event.HasEvents())
+            {
+                EditorGUILayout.LabelField(curCell.GetComponentName(), GUILayout.Width(100));
+            }
+            else
+            {
+                EditorGUILayout.LabelField(curCell.GetComponentName());
+            }
+            OnGUI_EventCell(curCell.m_Event);
+            EditorGUILayout.LabelField(curCell.GetName(), m_TextRightAlignment);
 
-            GUI.backgroundColor = Color.white;
-            if (GUI.Button(new Rect(664, buttonInitPosY , 30, 22), "x"))
+            GUILayout.Space(20);
+
+            GUI.color = Color.white;
+            if (GUILayout.Button("x", GUILayout.Width(40)))
             {
                 RemoveBindCell(curCell);
             }
 
             EditorGUILayout.EndHorizontal();
 
-            EditorGUILayout.LabelField("path:root/"+curCell.m_Path);
-
-            buttonInitPosY += 46;
+            EditorGUILayout.LabelField("path:root/" + curCell.m_Path);
         }
 
-        GUI.backgroundColor = Color.white;
-
-        for (int index = 0,cellcount = 0; index < m_BindCells.Count; index++)
+        if (m_UnabelCells.Count > 0)
         {
-            curCell = m_BindCells[index];
-            if (m_UnabelCells.Contains(curCell))
-            {
-                continue;
-            }
-
-            EditorGUILayout.BeginHorizontal("helpbox");
-
-            int[] eventX = null;
-            OnGUI_EventCell(curCell.m_Event, buttonInitPosY + 26 * cellcount,out eventX);
-            OnGUI_BindCellBackground(eventX, buttonInitPosY + 26 * cellcount, curCell);
-
-            EditorGUILayout.LabelField(curCell.m_Target.name, GUILayout.Width(130));
-            EditorGUILayout.LabelField(curCell.GetComponentName());
-            EditorGUILayout.LabelField(curCell.GetName(), GUILayout.Width(180));
-
-            GUI.backgroundColor = Color.white;
-            if (GUI.Button(new Rect(664, buttonInitPosY + 26 * cellcount, 30, 22), "x"))
-            {
-                RemoveBindCell(curCell);
-            }
-
-            EditorGUILayout.EndHorizontal();
-
-            cellcount += 1;
+            EditorGUILayout.Space();
         }
 
+        List<GameObject> keys = m_GoCells.Keys.ToList();
+        GameObject targetGo;
+        List<BindCell> cells;
+        for (int keyIndex = 0; keyIndex < keys.Count; keyIndex++)
+        {
+            targetGo = keys[keyIndex];
+            cells = m_GoCells[targetGo];
 
+            bool select = m_CurInfo != null && m_CurInfo.m_Target == targetGo;
+
+            GUI.color = select ? m_SelectColor : m_DefaultColor;
+
+            if (GUILayout.Button(targetGo.name, GUILayout.Width(140)))
+            {
+                Ping(targetGo);
+            }
+
+            for (int index = 0; index < cells.Count; index++)
+            {
+                curCell = cells[index];
+                if (m_UnabelCells.Contains(curCell))
+                {
+                    continue;
+                }
+
+                GUI.color = select ? m_SelectColor : m_DefaultColor;
+
+                EditorGUILayout.BeginHorizontal("helpbox");
+                
+                EditorGUILayout.LabelField(curCell.m_Target.name, GUILayout.Width(130));
+                if (curCell.m_Event.HasEvents())
+                {
+                    EditorGUILayout.LabelField(curCell.GetComponentName(), GUILayout.Width(100));
+                }
+                else
+                {
+                    EditorGUILayout.LabelField(curCell.GetComponentName());
+                }
+
+                OnGUI_EventCell(curCell.m_Event);
+                EditorGUILayout.LabelField(curCell.GetName(), m_TextRightAlignment);
+
+                GUILayout.Space(20);
+
+                GUI.color = Color.white;
+                if (GUILayout.Button("x", GUILayout.Width(40)))
+                {
+                    RemoveBindCell(curCell);
+                }
+
+                EditorGUILayout.EndHorizontal();
+            }
+
+            EditorGUILayout.Space();
+        }
     }
 
-    private void OnGUI_EventCell(EventCell target,int y,out int[] x)
+    private void OnGUI_EventCell(EventCell target)
     {
-        x = new[] {0, 0};
-
+        Color curColor = GUI.color;
+        GUI.color = Color.white;
         string[] componentEvents = target.ComponentEvents();
 
         if (componentEvents == null || componentEvents.Length == 0)
@@ -324,42 +398,28 @@ public class GUIBindWindow : EditorWindow
             return;
         }
 
-        System.Collections.Generic.List<string> options = new List<string>() {"Null"};
+        System.Collections.Generic.List<string> options = new List<string>() { "Null" };
         options.AddRange(componentEvents);
         string[] optionsArray = options.ToArray();
 
         int[] unableEvents = target.GetUnableEvent();
         int[] enableEvents = target.GetEnableEvent();
 
-        int curEventLength = unableEvents!=null ? unableEvents.Length + 1: 1;
+        int curEventLength = unableEvents != null ? unableEvents.Length + 1 : 1;
         int[] curEvnets = new int[curEventLength];
-
-        int xInit = 200;
-
-        GUIStyle popup = EditorStyles.popup;
-        popup.fixedHeight = 22;
-
-        GUI.depth -= 1;
+        
         if (unableEvents != null && unableEvents.Length > 0)
         {
-            x[0] = xInit;
             for (var index = 0; index < unableEvents.Length; index++)
             {
-                curEvnets[index] = EditorGUI.Popup(new Rect(x[0], y, 50, 40), unableEvents[index] + 1, optionsArray, popup);
-                x[0] += 50;
+                curEvnets[index] = EditorGUILayout.Popup( unableEvents[index] + 1, optionsArray);
             }
         }
 
         if (enableEvents != null && enableEvents.Length > 0)
         {
-            x[0] = x[0] == 0 ? xInit : x[0];
-            curEvnets[curEventLength - 1] = EditorGUI.Popup(new Rect(x[0], y, 50, 40), 0, optionsArray, popup);
-            x[0] += 50;
+            curEvnets[curEventLength - 1] = EditorGUILayout.Popup( 0, optionsArray);
         }
-
-        x[1] = x[0];
-        x[0] = xInit-8;
-
 
 
         target.Clear();
@@ -372,29 +432,7 @@ public class GUIBindWindow : EditorWindow
             }
         }
 
-    }
-
-    private void OnGUI_BindCellBackground(int[] eventX,int y,BindCell curCell)
-    {
-        GUI.backgroundColor = new Color(0.87f, 0.87f, 0.87f);
-        if (eventX[0] == 0)
-        {
-            if (GUI.Button(new Rect(8, y, 656, 22), ""))
-            {
-            Ping(curCell.m_Target);
-        }
-    }
-      else
-      {
-          if (GUI.Button(new Rect(8, y, eventX[0], 22), ""))
-          {
-              Ping(curCell.m_Target);
-}
-          if (GUI.Button(new Rect(eventX[1], y, 664 - eventX[1], 22), ""))
-          {
-              Ping(curCell.m_Target);
-          }
-      }
+        GUI.color = curColor;
     }
 
     #endregion
@@ -444,29 +482,50 @@ public class GUIBindWindow : EditorWindow
                         BindCell cell = cells[name];
                         cell.m_Path = match.Groups["path"].Value;
                         cell.m_Name = cell.m_Name.Replace("m_", string.Empty).Replace(cell.m_BehaviourType, string.Empty);
+
                         Transform target = m_Root.transform.Find(cell.m_Path);
+                        if (PrefabUtility.GetPrefabParent(target) == null)
+                        {
+                            target = null;
+                        }
+
                         object component = null;
+
+                        cell.m_Event.SetEventType(cell.m_BehaviourType);
+
+                        if (cell.m_BehaviourType == "GameObject")
+                        {
+                            cell.m_Type = BindCell.type.gameobject;
+                            cell.m_BehaviourType = string.Empty;
+                        }
+                        else if (cell.m_BehaviourType == "Transform")
+                        {
+                            cell.m_Type = BindCell.type.transform;
+                            cell.m_BehaviourType = string.Empty;
+                        }
+                        else
+                        {
+                            cell.m_Type = BindCell.type.behaviour;
+                        }
+
                         if (target != null)
                         {
                             cell.SetRoot(target.gameObject);
-                            cell.SetBehaviour(null);
 
-                            if (cell.m_BehaviourType == "GameObject")
+                            if (cell.m_Type == BindCell.type.gameobject)
                             {
-                                cell.m_Type = BindCell.type.gameobject;
                                 component = cell.m_Target;
                                 AddComponent(cell.m_Target);
+                                cell.SetBehaviour(null);
                             }
-                            else if (cell.m_BehaviourType == "Transform")
+                            else if (cell.m_Type == BindCell.type.transform)
                             {
-                                cell.m_Type = BindCell.type.transform;
-
                                 component = cell.m_Target.transform;
                                 AddComponent(cell.m_Target.transform);
+                                cell.SetBehaviour(null);
                             }
                             else
                             {
-                                cell.m_Type = BindCell.type.behaviour;
                                 component = cell.m_Target.GetComponent(cell.m_BehaviourType);
                                 if (component != null)
                                 {
@@ -476,11 +535,7 @@ public class GUIBindWindow : EditorWindow
                             }
                         }
 
-                        m_BindCells.Add(cell);
-                        if (component != null)
-                        {
-                            m_DualCells.Add(component, cell);
-                        }
+                        AddBindCell(component, cell);
                     }
                 }
 
@@ -565,10 +620,7 @@ public class GUIBindWindow : EditorWindow
 
     private void SetRoot(GameObject target)
     {
-        m_BindCells.Clear();
-        m_DualCells.Clear();
-        m_UnabelCells.Clear();
-        m_deleteCells.Clear();
+        UnInit();
 
         if (target == null)
         {
@@ -622,6 +674,12 @@ public class GUIBindWindow : EditorWindow
             cell.SetRoot(((MonoBehaviour)target).gameObject);
             cell.m_Type = BindCell.type.behaviour;
             cell.SetBehaviour((MonoBehaviour)target);
+            cell.m_Event.SetEventType(cell.m_Behaviour);
+
+            if (s_EventDefault.Contains(cell.m_BehaviourType))
+            {
+                cell.m_Event.AddIndex(0);
+            }
         }
 
         if (!enabel)
@@ -630,12 +688,29 @@ public class GUIBindWindow : EditorWindow
         }
 
         cell.m_Path = GetTargetPath(cell.m_Target.transform, cell.m_Path);
-
-        m_BindCells.Add(cell);
-        m_DualCells.Add(target, cell);
+        
+        AddBindCell(target, cell);
 
         NewCurInfo(m_CurInfo.m_Target != null ? m_CurInfo.m_Target : null);
+    }
 
+    private void AddBindCell(object target, BindCell cell)
+    {
+        m_BindCells.Add(cell);
+        if (target != null)
+        {
+            m_DualCells.Add(target, cell);
+        }
+
+        if (cell.m_Target != null)
+        {
+            if (!m_GoCells.ContainsKey(cell.m_Target))
+            {
+                m_GoCells.Add(cell.m_Target, new List<BindCell>());
+            }
+
+            m_GoCells[cell.m_Target].Add(cell);
+        }
     }
 
     private bool AddComponent(GameObject target)
@@ -693,11 +768,22 @@ public class GUIBindWindow : EditorWindow
         {
             m_BindCells.Remove(target);
             m_UnabelCells.Remove(target);
+
             object bindBehaviour = target.GetComponent();
             if (bindBehaviour!=null && m_DualCells.ContainsKey(bindBehaviour))
             {
                 m_DualCells.Remove(bindBehaviour);
             }
+
+            if (target.m_Target != null && m_GoCells.ContainsKey(target.m_Target))
+            {
+                m_GoCells[target.m_Target].Remove(target);
+                if (m_GoCells[target.m_Target].Count == 0)
+                {
+                    m_GoCells.Remove(target.m_Target);
+                }
+            }
+
             if (bindBehaviour is GameObject)
             {
                 RemoveComponent((GameObject) bindBehaviour);
@@ -808,15 +894,88 @@ public class GUIBindWindow : EditorWindow
     {
         BindCell curCell;
 
+        m_RecordBehaviours.Clear();
+        m_RecordGos.Clear();
+        m_RecordTrans.Clear();
+
         for (var index = 0; index < m_BindCells.Count; index++)
         {
             curCell = m_BindCells[index];
+
+            Transform target = m_Root.transform.Find(curCell.m_Path);
+
+            if (PrefabUtility.GetPrefabParent(target) == null)
+            {
+                target = null;
+            }
+
+            curCell.m_Target = target == null? null: target.gameObject;
+
+            if (curCell.m_Target!=null )
+            {
+                if (curCell.m_Type == BindCell.type.behaviour && !string.IsNullOrEmpty(curCell.m_BehaviourType))
+                {
+                    object behaviour = curCell.m_Target.GetComponent(curCell.m_BehaviourType);
+                    curCell.SetBehaviour((MonoBehaviour) behaviour);
+                    curCell.m_Event.SetEventType(curCell.m_BehaviourType);
+                    AddComponent((MonoBehaviour) behaviour);
+                }
+
+                if (curCell.m_Type == BindCell.type.gameobject)
+                {
+                    AddComponent(curCell.m_Target);
+                }
+
+                if (curCell.m_Type == BindCell.type.transform)
+                {
+                    AddComponent(curCell.m_Target.transform);
+                }
+            }
+
             if (curCell.IsAble())
             {
                 curCell.SetRoot(curCell.m_Target);
-                curCell.SetBehaviour(curCell.m_Behaviour);
                 curCell.m_Path = string.Empty;
                 curCell.m_Path = GetTargetPath(curCell.m_Target.transform, curCell.m_Path);
+            }
+        }
+    }
+
+    private void RefreshDualBindCell()
+    {
+        m_DualCells.Clear();
+
+        BindCell curCell;
+        object component;
+        for (var index = 0; index < m_BindCells.Count; index++)
+        {
+            curCell = m_BindCells[index];
+            component = curCell.GetComponent();
+            if (component != null)
+            {
+                m_DualCells.Add(component,curCell);
+            }
+        }
+    }
+
+    private void RefreshGOBindCell()
+    {
+        m_GoCells.Clear();
+
+        BindCell curCell;
+        GameObject target;
+        for (var index = 0; index < m_BindCells.Count; index++)
+        {
+            curCell = m_BindCells[index];
+            target = curCell.m_Target;
+            if (target != null)
+            {
+                if (!m_GoCells.ContainsKey(target))
+                {
+                    m_GoCells.Add(target, new List<BindCell>());
+                }
+
+                m_GoCells[target].Add(curCell);
             }
         }
     }
@@ -833,8 +992,19 @@ public class GUIBindWindow : EditorWindow
         m_UnabelCells.Clear();
     }
 
-    #endregion
+    private void RefreshAll()
+    {
+        RefreshBindCell();
 
+        RefreshUnableBindCell();
+        RefreshDualBindCell();
+        RefreshGOBindCell();
+        selectionChange();
+
+        NewCurInfo(Selection.activeGameObject);
+    }
+
+    #endregion
 
     #region 输出
 
@@ -1009,8 +1179,6 @@ public class GUIBindWindow : EditorWindow
             {
                 m_BehaviourType = m_Behaviour.GetType().Name;
             }
-
-            m_Event.SetEventType(behaviour);
         }
 
         public string GetName()
@@ -1119,7 +1287,7 @@ public class GUIBindWindow : EditorWindow
             {
                 for (var index = 0; index < selectIds.Length; index++)
                 {
-                    funName = m_Event.GetFuncName(this, index);
+                    funName = m_Event.GetFuncName(this, selectIds[index]);
                     if (existFunNames.Contains(funName))
                     {
                         continue;
@@ -1156,6 +1324,26 @@ public class GUIBindWindow : EditorWindow
             return m_Type;
         }
 
+        public void SetEventType(string behaviourType)
+        {
+            if (typeof(Button).Name == behaviourType)
+            {
+                m_Type = type.Button;
+            }
+            else if (typeof(Slider).Name == behaviourType)
+            {
+                m_Type = type.Slider;
+            }
+            else if (typeof(Toggle).Name == behaviourType)
+            {
+                m_Type = type.Toggle;
+            }
+            else
+            {
+                m_Type = type.Other;
+            }
+        }
+
         public void SetEventType(MonoBehaviour behaviour)
         {
             if (behaviour is Button)
@@ -1187,6 +1375,11 @@ public class GUIBindWindow : EditorWindow
             {
                 m_EventIds.Add(index);
             }
+        }
+
+        public bool HasEvents()
+        {
+            return m_EventIds.Count != 0;
         }
 
         public int[] GetUnableEvent()
@@ -1229,15 +1422,15 @@ public class GUIBindWindow : EditorWindow
         {
             if (m_Type == type.Button)
             {
-                return ButtonEvent;
+                return s_ButtonEvent;
             }
             else if (m_Type == type.Slider)
             {
-                return SliderEvent;
+                return s_SliderEvent;
             }
             else if (m_Type == type.Toggle)
             {
-                return ToggleEvent;
+                return s_ToggleEvent;
             }
 
             return null;
